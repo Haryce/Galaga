@@ -1,205 +1,191 @@
-#include "game.h"
+#include "Game.h"
 #include <iostream>
-#include <windows.h>    // Для Sleep, system
-#include <cstdlib>      // Для system
-#include <ctime>        // Для time
+Player::Player(int startX, int startY) : x(startX), y(startY), isShooting(false) {}
 
-using namespace std;
-
-// Константы для элементов игры
-const char PLAYER = 'A';
-const char ENEMY = 'V';
-const char SHOT = '|';
-const char EMPTY = ' ';
-
-// Коды виртуальных клавиш
-const int VK_A = 0x41;
-const int VK_D = 0x44;
-const int VK_P = 0x50;
-const int VK_SPACE = 0x20;
-
-Game::Game() {
-    reset();
+//движение игрока
+void Player::Move(int dx) {
+    x += dx;
+    // Ограничение движения
+    if (x < 1) x = 1;
+    if (x > 20) x = 20; //ширина
 }
 
-void Game::reset() {
-    playerX = WIDTH / 2; // Центрируем игрока
-    enemies.clear();     // Очищаем врагов
-    shots.clear();       // Очищаем выстрелы
-    enemySpawnTimer = 0; // Сбрасываем таймер
-    killed = 0;
-    passed = 0;
-    isPaused = false;
+void Player::Shoot() {
+    isShooting = true; 
+}
+
+Enemy::Enemy(int startX, int startY) : x(startX), y(startY), isActive(true) {}
+
+void Enemy::Move() {
+    y++;
+}
+
+Game::Game(int w, int h) : width(w), height(h), killedEnemies(0), reachedBottom(0),
+isPaused(false), isGameOver(false), playerWon(false) {
+    player = new Player(width / 2, height - 2); //создаем игрока в центре снизу
+    srand(static_cast<unsigned int>(time(0)));  //генератор случайных чисел
+}
+
+//деструктор
+Game::~Game() {
+    delete player;
+    for (auto enemy : enemies) {
+        delete enemy;
+    }
+}
+
+//создание нового врага
+void Game::SpawnEnemy() { //создание врагов
+    int x = rand() % width + 1;
+    enemies.push_back(new Enemy(x, 1));
+}
+void Game::ProcessInput() { //ввод
+    if (_kbhit()) {
+        int key = _getch();
+        //движения влево
+        if (key == 'a' || key == 'A' || key == 75) {
+            player->Move(-1);
+        }
+        //движения вправо
+        else if (key == 'd' || key == 'D' || key == 77) {
+            player->Move(1);
+        }
+        //выстрел
+        else if (key == ' ') {
+            player->Shoot();
+        }
+        //пауза
+        else if (key == 'p' || key == 'P') {
+            isPaused = !isPaused;
+        }
+    }
+}
+void Game::CheckCollisions() {
+    //выстрел игрока
+    if (player->isShooting) {
+        for (size_t i = 0; i < enemies.size(); ++i) {
+            if (enemies[i]->isActive && enemies[i]->x == player->x) {
+                enemies[i]->isActive = false; 
+                killedEnemies++;
+                //условие победы
+                if (killedEnemies >= 10) {
+                    isGameOver = true;
+                    playerWon = true;
+                }
+            }
+        }
+        player->isShooting = false; //Сброс выстрел
+    }
+    for (size_t i = 0; i < enemies.size(); ++i) { //проверяем врагов, достигших низа
+        if (enemies[i]->isActive && enemies[i]->y >= height - 1) {
+            enemies[i]->isActive = false;
+            reachedBottom++;
+            //проверяем условий поражения
+            if (reachedBottom >= 3) {
+                isGameOver = true;
+                playerWon = false;
+            }
+        }
+    }
+
+    //удаление неактивных врагов
+    enemies.erase(remove_if(enemies.begin(), enemies.end(),
+        [](Enemy* e) {
+            if (!e->isActive) {
+                delete e;
+                return true;
+            }
+            return false;
+        }),
+        enemies.end());
+}
+//обновление состояния игры
+void Game::Update() {
+    if (isPaused || isGameOver) return;
+    //случайное создание нового врага
+    if (rand() % 10 == 0) { //10% шанс создания врага каждый кадр
+        SpawnEnemy();
+    }
+
+    //движение врагов
+    for (auto enemy : enemies) {
+        if (enemy->isActive) {
+            enemy->Move();
+        }
+    }
+    CheckCollisions(); //проверка столкновений
+}
+// Отрисовка игры
+void Game::Draw() {
+    system("cls"); //очистка консоль
+    //верхнюю границу
+    for (int i = 0; i < width + 2; i++) cout << "#"; //верхнюю границу
+    cout << endl;
+    for (int y = 1; y <= height; y++) { //игровое поле
+        cout << "#"; // Левая граница
+        for (int x = 1; x <= width; x++) {
+            bool isPlayer = (x == player->x && y == player->y);
+            bool isEnemy = false;
+            bool isShot = (player->isShooting && x == player->x && y < player->y);
+            // Проверяем врага на позиции
+            for (auto enemy : enemies) {
+                if (enemy->isActive && enemy->x == x && enemy->y == y) {
+                    isEnemy = true;
+                    break;
+                }
+            }
+            if (isPlayer) cout << "A";
+            else if (isEnemy) cout << "V";
+            else if (isShot) cout << "|";
+            else cout << " ";
+        }
+        cout << "#" << endl; //правая граница
+    }
+    //нижняя граница
+    for (int i = 0; i < width + 2; i++) cout << "#";
+    cout << endl;
+    //вывод статистику
+    cout << "Уничтожено: " << killedEnemies << " / 10" << endl;
+    cout << "Достигло низа: " << reachedBottom << " / 3" << endl;
+    if (isPaused) cout << "ПАУЗА" << endl;
+    if (isGameOver) {
+        if (playerWon) cout << "ПОБЕДА! Нажмите R для рестарта или любую другую клавишу для выхода" << endl;
+        else cout << "ПОРАЖЕНИЕ! Нажмите R для рестарта или любую другую клавишу для выхода" << endl;
+    }
+}
+
+// Сброс игры
+void Game::ResetGame() {
+    //очищаем врагов
+    for (auto enemy : enemies) {
+        delete enemy;
+    }
+    enemies.clear();
+    //cбос статистику
+    killedEnemies = 0;
+    reachedBottom = 0;
     isGameOver = false;
-    isWin = false;
+    playerWon = false;
+    delete player;
+    player = new Player(width / 2, height - 2);
 }
-
-void Game::run() {
+void Game::Run() {
     while (true) {
-        // Главный игровой цикл
-        while (!isGameOver) {
-            handleInput();
-
-            if (!isPaused) {
-                update();
-            }
-
-            render();
-            Sleep(50); // Задержка для управления скоростью
-        }
-
-        // Обработка завершения игры
-        render();
-        cout << (isWin ? "You WIN!" : "Game OVER!") << endl;
-        cout << "Play again? (y/n): ";
-
-        char choice;
-        cin >> choice;
-
-        if (choice == 'y' || choice == 'Y') {
-            reset();
-        } else {
-            break;
-        }
-    }
-}
-
-void Game::handleInput() {
-    // Проверка состояния клавиш
-    if (GetAsyncKeyState(VK_LEFT) || GetAsyncKeyState(VK_A)) {
-        if (playerX > 0) playerX--;
-    }
-    if (GetAsyncKeyState(VK_RIGHT) || GetAsyncKeyState(VK_D)) {
-        if (playerX < WIDTH - 1) playerX++;
-    }
-    if (GetAsyncKeyState(VK_SPACE)) {
-        // Добавляем выстрел только если предыдущий уже ушел достаточно далеко
-        if (shots.empty() || shots.back() < HEIGHT - 5) {
-            shots.push_back(HEIGHT - 2);
-        }
-    }
-    if (GetAsyncKeyState(VK_P)) {
-        isPaused = !isPaused;
-        // Задержка для предотвращения многократного срабатывания
-        Sleep(200);
-    }
-}
-
-void Game::update() {
-    // Генерация новых врагов
-    if (++enemySpawnTimer >= 20) { // Каждые 20 итераций
-        enemies.push_back(rand() % WIDTH);
-        enemySpawnTimer = 0;
-    }
-
-    // Движение врагов вниз
-    for (int i = 0; i < enemies.size(); i++) {
-        // Удаление врагов достигших низа
-        if (enemies[i] < 0) { // Помечаем достигших дна
-            enemies.erase(enemies.begin() + i);
-            passed++;
-            i--;
-            continue;
-        }
-
-        // Каждый 10-й кадр двигаем врагов
-        if (rand() % 10 == 0) {
-            enemies[i] += WIDTH; // Перемещаем в "нижний ряд"
-        }
-    }
-
-    // Движение выстрелов
-    for (int i = 0; i < shots.size(); i++) {
-        shots[i]--; // Передвигаем выстрел вверх
-
-        // Удаление выстрелов вышедших за пределы
-        if (shots[i] < 0) {
-            shots.erase(shots.begin() + i);
-            i--;
-            continue;
-        }
-
-        // Проверка столкновений
-        for (int j = 0; j < enemies.size(); j++) {
-            if (enemies[j] >= 0 && enemies[j] < WIDTH) { // Враги в верхнем ряду
-                // Проверка координат X врага и выстрела
-                if (enemies[j] == playerX && shots[i] == 0) {
-                    // Уничтожение врага
-                    enemies[j] = -1; // Помечаем для удаления
-                    shots[i] = -1;   // Помечаем выстрел для удаления
-                    killed++;
+        ProcessInput(); //обработка ввода
+        Update();      //обновление состояния
+        Draw();        //отрисовка
+        if (isGameOver) { //рестарт
+            if (_kbhit()) {
+                int key = _getch();
+                if (key == 'r' || key == 'R') {
+                    ResetGame();
+                }
+                else {
                     break;
                 }
             }
         }
+
+        Sleep(100); //задержка для управления скоростью игры
     }
-
-    // Условие победы
-    if (killed >= 10) {
-        isGameOver = true;
-        isWin = true;
-    }
-
-    // Условие поражения
-    if (passed >= 3) {
-        isGameOver = true;
-    }
-}
-
-void Game::render() const {
-    system("cls"); // Очистка консоли
-
-    // Верхняя граница
-    cout << '+';
-    for (int x = 0; x < WIDTH; x++) cout << '-';
-    cout << '+' << endl;
-
-    // Игровое поле
-    for (int y = 0; y < HEIGHT; y++) {
-        cout << '|'; // Левая граница
-
-        for (int x = 0; x < WIDTH; x++) {
-            char cell = EMPTY;
-
-            // Отрисовка врагов (верхний ряд)
-            for (int e : enemies) {
-                if (e == x && y == 0) {
-                    cell = ENEMY;
-                    break;
-                }
-            }
-
-            // Отрисовка выстрелов
-            for (int s : shots) {
-                if (x == playerX && y == s) {
-                    cell = SHOT;
-                    break;
-                }
-            }
-
-            // Отрисовка игрока
-            if (y == HEIGHT - 1 && x == playerX) {
-                cell = PLAYER;
-            }
-
-            cout << cell;
-        }
-
-        cout << '|'; // Правая граница
-
-        // Вывод статистики
-        if (y == 0) cout << " Killed: " << killed;
-        if (y == 1) cout << " Passed: " << passed;
-        if (y == 2) cout << " " << (isPaused ? "[PAUSED]" : "");
-
-        cout << endl;
-    }
-
-    // Нижняя граница
-    cout << '+';
-    for (int x = 0; x < WIDTH; x++) cout << '-';
-    cout << '+' << endl;
-
-    // Подсказка по управлению
-    cout << "Controls: A/<- D/-> SPACE-shoot P-pause" << endl;
 }
